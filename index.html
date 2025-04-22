@@ -99,10 +99,10 @@
         const bufferSize = canvasWidth;
         let visualBuffer = new Array(bufferSize).fill(0);
         let bufferWriteIndex = 0;
-        let visualState = 'idle';
+        let visualState = 'idle'; // 'idle', 'signal', 'space'
         let visualSignalEndTimeMs = 0;
         let visualSpaceEndTimeMs = 0;
-        const scrollSpeed = 2; // ★ Speed factor for scrolling
+        const scrollSpeed = 2; // ★ Set scroll speed back to 2
 
 
         // --- UI Elements ---
@@ -176,9 +176,7 @@
             if (!isAnySourceActive) {
                 isSignalSourceActive = false;
                 if (signalTimer) { clearTimeout(signalTimer); signalTimer = null; }
-                visualState = 'idle';
-                visualSignalEndTimeMs = 0;
-                visualSpaceEndTimeMs = 0;
+                // Let the visual state naturally transition to idle via drawOscilloscope timing
             } else {
                  if (signalTimer && ((currentSignalType === 'dot' && !keyHeld.ArrowLeft && !dotButton.classList.contains('button-pressed')) || (currentSignalType === 'dash' && !keyHeld.ArrowRight && !dashButton.classList.contains('button-pressed')))) {
                      clearTimeout(signalTimer); signalTimer = null;
@@ -196,7 +194,7 @@
             if (visualState === 'signal' && currentTimeMs >= visualSignalEndTimeMs) {
                 visualState = 'space';
             }
-            if (visualState === 'space' && currentTimeMs >= visualSpaceEndTimeMs) {
+            if (visualState === 'space' && currentTimeMs >= visualSpaceEndTimeMs && !isSignalSourceActive) {
                 visualState = 'idle';
                 visualSignalEndTimeMs = 0;
                 visualSpaceEndTimeMs = 0;
@@ -207,7 +205,6 @@
             for (let i = 0; i < scrollSpeed; i++) {
                  visualBuffer[(bufferWriteIndex + i) % bufferSize] = currentFrameState;
             }
-
 
             // 2. Clear canvas
             ctx.fillStyle = '#1a202c';
@@ -238,14 +235,15 @@
                     ctx.moveTo(x, y);
                 } else {
                     // ★ Adjust previous state index check for faster scroll
-                    const prevReadIndex = (readIndex + scrollSpeed + bufferSize -1) % bufferSize; // Look back scrollSpeed steps
+                    // Look back scrollSpeed steps for the previous *drawn* state
+                    const prevReadIndex = (readIndex + scrollSpeed) % bufferSize;
                     const prevState = visualBuffer[prevReadIndex];
                      if (prevState !== state && previousY !== -1) {
                          const fromBaseY = (prevState === 1) ? highYBase : lowYBase;
                          const toBaseY = (state === 1) ? highYBase : lowYBase;
-                         // Draw vertical line more carefully
-                         ctx.lineTo(x + 1, fromBaseY); // Connect to previous base Y at x+1
-                         ctx.lineTo(x + 1, toBaseY);   // Draw vertical line at x+1
+                         // Draw vertical line carefully at x+1
+                         ctx.lineTo(x + 1, fromBaseY);
+                         ctx.lineTo(x + 1, toBaseY);
                      }
                     ctx.lineTo(x, y); // Draw horizontal segment
                 }
