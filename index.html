@@ -22,6 +22,9 @@
         canvas {
             background-color: #1a202c;
             border-radius: 0.5rem;
+            height: 120px;
+            width: 100%;
+            display: block;
         }
         .circle-button {
             display: flex;
@@ -32,17 +35,18 @@
         }
     </style>
 </head>
-<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen p-4">
+<body class="bg-gray-100 flex flex-col items-center justify-start min-h-screen p-4 pt-8">
 
-    <div class="bg-white p-6 md:p-8 rounded-lg shadow-xl w-full max-w-2xl">
-        <h1 class="text-2xl md:text-3xl font-bold text-center text-gray-800 mb-6">簡易モールス信号シミュレーター</h1>
+    <div class="bg-white p-4 sm:p-6 md:p-8 rounded-lg shadow-xl w-full max-w-lg">
+
+        <h1 class="text-xl sm:text-2xl md:text-3xl font-bold text-center text-gray-800 mb-4">簡易モールス信号<br>シミュレーター</h1>
         <p class="text-center text-gray-600 mb-4 text-sm">ヒント: ← キーで短点、→ キーで長点を送信できます。</p>
 
-        <div class="mb-6">
-            <canvas id="oscilloscope" width="600" height="100" class="w-full rounded-md"></canvas>
+        <div class="mb-4 px-4 sm:px-8">
+            <canvas id="oscilloscope" width="600" height="120"></canvas>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <div class="grid grid-cols-1 gap-4 mb-8 px-4 sm:px-8">
             <div>
                 <label for="wpmSlider" class="block text-sm font-medium text-gray-700 mb-1">速度 (WPM: <span id="wpmValue">8</span>)</label>
                 <input type="range" id="wpmSlider" min="5" max="15" value="8" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
@@ -53,16 +57,14 @@
             </div>
         </div>
 
-        <div class="flex justify-center gap-8 md:gap-12">
-            <button id="dotButton" class="circle-button bg-blue-500 hover:bg-blue-600 text-white font-bold w-20 h-20 md:w-24 md:h-24 rounded-full shadow-md transition duration-150 ease-in-out focus:outline-none flex items-center justify-center">
+        <div class="flex justify-center gap-6 md:gap-10 mb-4">
+            <button id="dotButton" class="circle-button bg-blue-500 hover:bg-blue-600 text-white font-bold w-16 h-16 md:w-20 md:h-20 rounded-full shadow-md transition duration-150 ease-in-out focus:outline-none flex items-center justify-center text-sm">
                  ・<br>(短点)
             </button>
-            <button id="dashButton" class="circle-button bg-green-500 hover:bg-green-600 text-white font-bold w-20 h-20 md:w-24 md:h-24 rounded-full shadow-md transition duration-150 ease-in-out focus:outline-none flex items-center justify-center">
+            <button id="dashButton" class="circle-button bg-green-500 hover:bg-green-600 text-white font-bold w-16 h-16 md:w-20 md:h-20 rounded-full shadow-md transition duration-150 ease-in-out focus:outline-none flex items-center justify-center text-sm">
                  －<br>(長点)
             </button>
         </div>
-
-        <div id="statusMessage" class="text-center text-gray-500 mt-4 h-5"></div>
 
     </div>
 
@@ -84,25 +86,23 @@
         const canvas = document.getElementById('oscilloscope');
         const ctx = canvas.getContext('2d');
         canvas.width = 600;
-        canvas.height = 100;
-        canvas.style.width = '100%';
-        canvas.style.height = 'auto';
-        const canvasWidth = canvas.width;
-        const canvasHeight = canvas.height;
+        canvas.height = 120; // Match HTML height attribute
+        const canvasWidth = canvas.width; // Use logical width for drawing
+        const canvasHeight = canvas.height; // Use logical height for drawing
         let animationFrameId = null;
         const noiseAmplitude = 1.5;
         const lowYBase = canvasHeight * 0.75;
         const highYBase = canvasHeight * 0.25;
 
 
-        // --- Oscilloscope Buffer and Visual State --- ★ Modified
+        // --- Oscilloscope Buffer and Visual State ---
         const bufferSize = canvasWidth;
         let visualBuffer = new Array(bufferSize).fill(0); // 0: low, 1: high
         let bufferWriteIndex = 0;
         let visualState = 'idle'; // 'idle', 'signal', 'space'
-        let visualSignalEndTimeMs = 0; // Timestamp when the signal visual should end
-        let visualSpaceEndTimeMs = 0;  // Timestamp when the space visual should end
-        // const FRAMERATE_APPROX = 60; // No longer needed
+        let visualSignalEndTimeMs = 0;
+        let visualSpaceEndTimeMs = 0;
+
 
         // --- UI Elements ---
         const wpmSlider = document.getElementById('wpmSlider');
@@ -111,7 +111,7 @@
         const ratioValueSpan = document.getElementById('ratioValue');
         const dotButton = document.getElementById('dotButton');
         const dashButton = document.getElementById('dashButton');
-        const statusMessage = document.getElementById('statusMessage');
+        // const statusMessage = document.getElementById('statusMessage'); // ★ No longer needed
 
         // --- Audio Initialization ---
         function initAudio() {
@@ -133,18 +133,15 @@
             spaceDurationMs = dotDurationMs;
         }
 
-        // --- Signal Generation --- ★ Modified
+        // --- Signal Generation ---
         function playTone(durationMs, frequency = 600) {
             if (!synth) return;
             const now = Tone.now();
             synth.triggerAttackRelease(frequency, durationMs / 1000, now);
-
-            // ★ Schedule visual state end times using performance.now()
             const nowMs = performance.now();
             visualSignalEndTimeMs = nowMs + durationMs;
             visualSpaceEndTimeMs = visualSignalEndTimeMs + spaceDurationMs;
-            visualState = 'signal'; // Set visual state to signal
-            // console.log(`Visual scheduled: Signal End=${visualSignalEndTimeMs.toFixed(0)}, Space End=${visualSpaceEndTimeMs.toFixed(0)}`);
+            visualState = 'signal';
         }
 
         function startSignal(isDash) {
@@ -161,72 +158,59 @@
             currentSignalType = isDash ? 'dash' : 'dot';
             const duration = isDash ? dashDurationMs : dotDurationMs;
             const totalCycleDuration = duration + spaceDurationMs;
-
             function signalLoop() {
                 const isDotSourceActive = keyHeld.ArrowLeft || dotButton.classList.contains('button-pressed');
                 const isDashSourceActive = keyHeld.ArrowRight || dashButton.classList.contains('button-pressed');
                 if ((currentSignalType === 'dot' && !isDotSourceActive) || (currentSignalType === 'dash' && !isDashSourceActive)) {
-                    clearTimeout(signalTimer); signalTimer = null;
-                    // Don't reset visual state here, let stopSignal handle it
-                    return;
+                    clearTimeout(signalTimer); signalTimer = null; return;
                 }
-                playTone(duration); // Schedules visual state changes
+                playTone(duration);
                 signalTimer = setTimeout(signalLoop, totalCycleDuration);
             }
             signalLoop();
-            statusMessage.textContent = isDash ? '長点 送信中...' : '短点 送信中...';
+            // ★ Removed status message update
+            // statusMessage.textContent = isDash ? '長点 送信中...' : '短点 送信中...';
         }
 
-        // --- Stop Signal --- ★ Modified
+        // --- Stop Signal ---
         function stopSignal() {
             const isAnySourceActive = keyHeld.ArrowLeft || keyHeld.ArrowRight || dotButton.classList.contains('button-pressed') || dashButton.classList.contains('button-pressed');
             if (!isAnySourceActive) {
-                isSignalSourceActive = false; statusMessage.textContent = '';
+                isSignalSourceActive = false;
+                // ★ Removed status message update
+                // statusMessage.textContent = '';
                 if (signalTimer) { clearTimeout(signalTimer); signalTimer = null; }
-
-                // ★ Immediately set visual state to idle when all sources are released
-                // This might cut off the tail end of a scheduled space visual, but ensures responsiveness.
                 visualState = 'idle';
                 visualSignalEndTimeMs = 0;
                 visualSpaceEndTimeMs = 0;
-                // console.log("All sources released, visual state set to idle.");
-
             } else {
-                 // If only one source was released, but others remain, stop its specific timer if running
                  if (signalTimer && ((currentSignalType === 'dot' && !keyHeld.ArrowLeft && !dotButton.classList.contains('button-pressed')) || (currentSignalType === 'dash' && !keyHeld.ArrowRight && !dashButton.classList.contains('button-pressed')))) {
                      clearTimeout(signalTimer); signalTimer = null;
                  }
             }
-            // Clear current signal type if its source was released
             if ((currentSignalType === 'dot' && !keyHeld.ArrowLeft && !dotButton.classList.contains('button-pressed')) || (currentSignalType === 'dash' && !keyHeld.ArrowRight && !dashButton.classList.contains('button-pressed'))) {
                  currentSignalType = null;
             }
         }
 
-        // --- Oscilloscope Drawing (Time-based State) --- ★ Modified
+        // --- Oscilloscope Drawing (Time-based State, Right-to-Left) ---
         function drawOscilloscope() {
-            // 1. Update visual state based on time
             const currentTimeMs = performance.now();
             if (visualState === 'signal' && currentTimeMs >= visualSignalEndTimeMs) {
                 visualState = 'space';
-                // console.log(`Visual state change: signal -> space at ${currentTimeMs.toFixed(0)}`);
             }
             if (visualState === 'space' && currentTimeMs >= visualSpaceEndTimeMs) {
                 visualState = 'idle';
-                visualSignalEndTimeMs = 0; // Reset end times
+                visualSignalEndTimeMs = 0;
                 visualSpaceEndTimeMs = 0;
-                // console.log(`Visual state change: space -> idle at ${currentTimeMs.toFixed(0)}`);
             }
 
-            // 2. Determine current frame state based on visualState
             const currentFrameState = (visualState === 'signal') ? 1 : 0;
             visualBuffer[bufferWriteIndex] = currentFrameState;
 
-            // 3. Clear canvas
             ctx.fillStyle = '#1a202c';
-            ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+            ctx.fillRect(0, 0, canvasWidth, canvasHeight); // Use logical width/height
 
-            // 4. Draw the trace from the buffer (right to left)
             ctx.strokeStyle = '#4ade80';
             ctx.lineWidth = 1.5;
             ctx.beginPath();
@@ -264,10 +248,7 @@
             }
             ctx.stroke();
 
-            // 5. Move write index for the next frame
             bufferWriteIndex = (bufferWriteIndex + 1) % bufferSize;
-
-            // 6. Request next frame
             animationFrameId = requestAnimationFrame(drawOscilloscope);
         }
 
@@ -277,7 +258,6 @@
             if (!animationFrameId) {
                 console.log("Starting oscilloscope...");
                 visualBuffer.fill(0); bufferWriteIndex = 0;
-                // Reset visual state and timers when starting/restarting
                 visualState = 'idle';
                 visualSignalEndTimeMs = 0;
                 visualSpaceEndTimeMs = 0;
@@ -302,6 +282,7 @@
         wpmValueSpan.textContent = wpm;
         ratioValueSpan.textContent = dashRatio.toFixed(1);
         window.onload = () => {
+           // Draw initial line at the lower baseline
            ctx.fillStyle = '#1a202c'; ctx.fillRect(0, 0, canvasWidth, canvasHeight);
            ctx.strokeStyle = '#4ade80'; ctx.lineWidth = 1.5; ctx.beginPath();
            ctx.moveTo(0, lowYBase);
