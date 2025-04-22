@@ -57,11 +57,11 @@
             </div>
         </div>
 
-        <div class="flex justify-center gap-6 md:gap-10 mb-4">
-            <button id="dotButton" class="circle-button bg-blue-500 hover:bg-blue-600 text-white font-bold w-16 h-16 md:w-20 md:h-20 rounded-full shadow-md transition duration-150 ease-in-out focus:outline-none flex items-center justify-center text-sm">
+        <div class="flex justify-center gap-10 md:gap-16 mb-4">
+            <button id="dotButton" class="circle-button bg-blue-500 hover:bg-blue-600 text-white font-bold w-24 h-24 md:w-[7.5rem] md:h-[7.5rem] rounded-full shadow-md transition duration-150 ease-in-out focus:outline-none flex items-center justify-center text-base">
                  ・<br>(短点)
             </button>
-            <button id="dashButton" class="circle-button bg-green-500 hover:bg-green-600 text-white font-bold w-16 h-16 md:w-20 md:h-20 rounded-full shadow-md transition duration-150 ease-in-out focus:outline-none flex items-center justify-center text-sm">
+            <button id="dashButton" class="circle-button bg-green-500 hover:bg-green-600 text-white font-bold w-24 h-24 md:w-[7.5rem] md:h-[7.5rem] rounded-full shadow-md transition duration-150 ease-in-out focus:outline-none flex items-center justify-center text-base">
                  －<br>(長点)
             </button>
         </div>
@@ -111,7 +111,7 @@
         const ratioValueSpan = document.getElementById('ratioValue');
         const dotButton = document.getElementById('dotButton');
         const dashButton = document.getElementById('dashButton');
-        // const statusMessage = document.getElementById('statusMessage'); // ★ No longer needed
+        // const statusMessage = document.getElementById('statusMessage'); // Status message div is removed
 
         // --- Audio Initialization ---
         function initAudio() {
@@ -168,8 +168,6 @@
                 signalTimer = setTimeout(signalLoop, totalCycleDuration);
             }
             signalLoop();
-            // ★ Removed status message update
-            // statusMessage.textContent = isDash ? '長点 送信中...' : '短点 送信中...';
         }
 
         // --- Stop Signal ---
@@ -177,8 +175,6 @@
             const isAnySourceActive = keyHeld.ArrowLeft || keyHeld.ArrowRight || dotButton.classList.contains('button-pressed') || dashButton.classList.contains('button-pressed');
             if (!isAnySourceActive) {
                 isSignalSourceActive = false;
-                // ★ Removed status message update
-                // statusMessage.textContent = '';
                 if (signalTimer) { clearTimeout(signalTimer); signalTimer = null; }
                 visualState = 'idle';
                 visualSignalEndTimeMs = 0;
