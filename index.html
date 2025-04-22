@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>簡易モールス信号シミュレーター</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+        }
+        .button-pressed {
+            transform: scale(0.95);
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+        }
+        canvas {
+            background-color: #1a202c;
+            border-radius: 0.5rem;
+        }
+        .circle-button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            line-height: 1.2;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="bg-white p-6 md:p-8 rounded-lg shadow-xl w-full max-w-2xl">
+        <h1 class="text-2xl md:text-3xl font-bold text-center text-gray-800 mb-6">簡易モールス信号シミュレーター</h1>
+        <p class="text-center text-gray-600 mb-4 text-sm">ヒント: ← キーで短点、→ キーで長点を送信できます。</p>
+
+        <div class="mb-6">
+            <canvas id="oscilloscope" width="600" height="100" class="w-full rounded-md"></canvas>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <div>
+                <label for="wpmSlider" class="block text-sm font-medium text-gray-700 mb-1">速度 (WPM: <span id="wpmValue">8</span>)</label>
+                <input type="range" id="wpmSlider" min="5" max="15" value="8" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+            </div>
+            <div>
+                 <label for="ratioSlider" class="block text-sm font-medium text-gray-700 mb-1">短点:空白:長点 (1:1:<span id="ratioValue">3.0</span>)</label>
+                 <input type="range" id="ratioSlider" min="3.0" max="4.5" step="0.1" value="3.0" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+            </div>
+        </div>
+
+        <div class="flex justify-center gap-8 md:gap-12">
+            <button id="dotButton" class="circle-button bg-blue-500 hover:bg-blue-600 text-white font-bold w-20 h-20 md:w-24 md:h-24 rounded-full shadow-md transition duration-150 ease-in-out focus:outline-none flex items-center justify-center">
+                 ・<br>(短点)
+            </button>
+            <button id="dashButton" class="circle-button bg-green-500 hover:bg-green-600 text-white font-bold w-20 h-20 md:w-24 md:h-24 rounded-full shadow-md transition duration-150 ease-in-out focus:outline-none flex items-center justify-center">
+                 －<br>(長点)
+            </button>
+        </div>
+
+        <div id="statusMessage" class="text-center text-gray-500 mt-4 h-5"></div>
+
+    </div>
+
+    <script>
+        // --- Global Variables ---
+        let synth;
+        let wpm = 8;
+        let dashRatio = 3.0;
+        let dotDurationMs = 1200 / wpm;
+        let dashDurationMs = dotDurationMs * dashRatio;
+        let spaceDurationMs = dotDurationMs;
+
+        let isSignalSourceActive = false;
+        let signalTimer = null;
+        let currentSignalType = null;
+        let keyHeld = { ArrowLeft: false, ArrowRight: false };
+
+        // --- Canvas Setup ---
+        const canvas = document.getElementById('oscilloscope');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 600;
+        canvas.height = 100;
+        canvas.style.width = '100%';
+        canvas.style.height = 'auto';
+        const canvasWidth = canvas.width;
+        const canvasHeight = canvas.height;
+        let animationFrameId = null;
+        const noiseAmplitude = 1.5;
+        const lowYBase = canvasHeight * 0.75;
+        const highYBase = canvasHeight * 0.25;
+
+
+        // --- Oscilloscope Buffer and Visual State --- ★ Modified
+        const bufferSize = canvasWidth;
+        let visualBuffer = new Array(bufferSize).fill(0); // 0: low, 1: high
+        let bufferWriteIndex = 0;
+        let visualState = 'idle'; // 'idle', 'signal', 'space'
+        let visualSignalEndTimeMs = 0; // Timestamp when the signal visual should end
+        let visualSpaceEndTimeMs = 0;  // Timestamp when the space visual should end
+        // const FRAMERATE_APPROX = 60; // No longer needed
+
+        // --- UI Elements ---
+        const wpmSlider = document.getElementById('wpmSlider');
+        const wpmValueSpan = document.getElementById('wpmValue');
+        const ratioSlider = document.getElementById('ratioSlider');
+        const ratioValueSpan = document.getElementById('ratioValue');
+        const dotButton = document.getElementById('dotButton');
+        const dashButton = document.getElementById('dashButton');
+        const statusMessage = document.getElementById('statusMessage');
+
+        // --- Audio Initialization ---
+        function initAudio() {
+            if (!synth) {
+                synth = new Tone.Synth({
+                    oscillator: { type: "sine" },
+                    envelope: { attack: 0.005, decay: 0.01, sustain: 0.9, release: 0.05 },
+                    volume: -10
+                }).toDestination();
+                console.log("Audio context initialized.");
+                startOscilloscope();
+            }
+        }
+
+        // --- Timing Calculation ---
+        function updateTiming() {
+            dotDurationMs = 1200 / wpm;
+            dashDurationMs = dotDurationMs * dashRatio;
+            spaceDurationMs = dotDurationMs;
+        }
+
+        // --- Signal Generation --- ★ Modified
+        function playTone(durationMs, frequency = 600) {
+            if (!synth) return;
+            const now = Tone.now();
+            synth.triggerAttackRelease(frequency, durationMs / 1000, now);
+
+            // ★ Schedule visual state end times using performance.now()
+            const nowMs = performance.now();
+            visualSignalEndTimeMs = nowMs + durationMs;
+            visualSpaceEndTimeMs = visualSignalEndTimeMs + spaceDurationMs;
+            visualState = 'signal'; // Set visual state to signal
+            // console.log(`Visual scheduled: Signal End=${visualSignalEndTimeMs.toFixed(0)}, Space End=${visualSpaceEndTimeMs.toFixed(0)}`);
+        }
+
+        function startSignal(isDash) {
+            if (!synth) {
+                Tone.start().then(initAudio).catch(e => console.error("Tone.start failed:", e));
+            }
+            if (!synth) {
+                console.warn("Audio not ready yet. Retrying...");
+                setTimeout(() => startSignal(isDash), 100);
+                return;
+            }
+            isSignalSourceActive = true;
+            if (signalTimer) { clearTimeout(signalTimer); signalTimer = null; }
+            currentSignalType = isDash ? 'dash' : 'dot';
+            const duration = isDash ? dashDurationMs : dotDurationMs;
+            const totalCycleDuration = duration + spaceDurationMs;
+
+            function signalLoop() {
+                const isDotSourceActive = keyHeld.ArrowLeft || dotButton.classList.contains('button-pressed');
+                const isDashSourceActive = keyHeld.ArrowRight || dashButton.classList.contains('button-pressed');
+                if ((currentSignalType === 'dot' && !isDotSourceActive) || (currentSignalType === 'dash' && !isDashSourceActive)) {
+                    clearTimeout(signalTimer); signalTimer = null;
+                    // Don't reset visual state here, let stopSignal handle it
+                    return;
+                }
+                playTone(duration); // Schedules visual state changes
+                signalTimer = setTimeout(signalLoop, totalCycleDuration);
+            }
+            signalLoop();
+            statusMessage.textContent = isDash ? '長点 送信中...' : '短点 送信中...';
+        }
+
+        // --- Stop Signal --- ★ Modified
+        function stopSignal() {
+            const isAnySourceActive = keyHeld.ArrowLeft || keyHeld.ArrowRight || dotButton.classList.contains('button-pressed') || dashButton.classList.contains('button-pressed');
+            if (!isAnySourceActive) {
+                isSignalSourceActive = false; statusMessage.textContent = '';
+                if (signalTimer) { clearTimeout(signalTimer); signalTimer = null; }
+
+                // ★ Immediately set visual state to idle when all sources are released
+                // This might cut off the tail end of a scheduled space visual, but ensures responsiveness.
+                visualState = 'idle';
+                visualSignalEndTimeMs = 0;
+                visualSpaceEndTimeMs = 0;
+                // console.log("All sources released, visual state set to idle.");
+
+            } else {
+                 // If only one source was released, but others remain, stop its specific timer if running
+                 if (signalTimer && ((currentSignalType === 'dot' && !keyHeld.ArrowLeft && !dotButton.classList.contains('button-pressed')) || (currentSignalType === 'dash' && !keyHeld.ArrowRight && !dashButton.classList.contains('button-pressed')))) {
+                     clearTimeout(signalTimer); signalTimer = null;
+                 }
+            }
+            // Clear current signal type if its source was released
+            if ((currentSignalType === 'dot' && !keyHeld.ArrowLeft && !dotButton.classList.contains('button-pressed')) || (currentSignalType === 'dash' && !keyHeld.ArrowRight && !dashButton.classList.contains('button-pressed'))) {
+                 currentSignalType = null;
+            }
+        }
+
+        // --- Oscilloscope Drawing (Time-based State) --- ★ Modified
+        function drawOscilloscope() {
+            // 1. Update visual state based on time
+            const currentTimeMs = performance.now();
+            if (visualState === 'signal' && currentTimeMs >= visualSignalEndTimeMs) {
+                visualState = 'space';
+                // console.log(`Visual state change: signal -> space at ${currentTimeMs.toFixed(0)}`);
+            }
+            if (visualState === 'space' && currentTimeMs >= visualSpaceEndTimeMs) {
+                visualState = 'idle';
+                visualSignalEndTimeMs = 0; // Reset end times
+                visualSpaceEndTimeMs = 0;
+                // console.log(`Visual state change: space -> idle at ${currentTimeMs.toFixed(0)}`);
+            }
+
+            // 2. Determine current frame state based on visualState
+            const currentFrameState = (visualState === 'signal') ? 1 : 0;
+            visualBuffer[bufferWriteIndex] = currentFrameState;
+
+            // 3. Clear canvas
+            ctx.fillStyle = '#1a202c';
+            ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+            // 4. Draw the trace from the buffer (right to left)
+            ctx.strokeStyle = '#4ade80';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+
+            let readIndex = bufferWriteIndex;
+            let previousY = -1;
+
+            for (let x = canvasWidth - 1; x >= 0; x--) {
+                const state = visualBuffer[readIndex];
+                let y;
+                const noiseY = (Math.random() - 0.5) * noiseAmplitude * 2;
+
+                if (state === 1) { // High state
+                    y = highYBase + noiseY;
+                } else { // Low state (baseline or space)
+                    y = lowYBase + noiseY;
+                }
+
+                y = Math.max(ctx.lineWidth / 2, Math.min(canvasHeight - ctx.lineWidth / 2, y));
+
+                if (x === canvasWidth - 1) {
+                    ctx.moveTo(x, y);
+                } else {
+                    const prevState = visualBuffer[(readIndex + bufferSize - 1) % bufferSize];
+                     if (prevState !== state && previousY !== -1) {
+                         const fromBaseY = (prevState === 1) ? highYBase : lowYBase;
+                         const toBaseY = (state === 1) ? highYBase : lowYBase;
+                         ctx.lineTo(x + 1, fromBaseY);
+                         ctx.lineTo(x + 1, toBaseY);
+                     }
+                    ctx.lineTo(x, y);
+                }
+                previousY = y;
+                readIndex = (readIndex - 1 + bufferSize) % bufferSize;
+            }
+            ctx.stroke();
+
+            // 5. Move write index for the next frame
+            bufferWriteIndex = (bufferWriteIndex + 1) % bufferSize;
+
+            // 6. Request next frame
+            animationFrameId = requestAnimationFrame(drawOscilloscope);
+        }
+
+
+        // --- Start Oscilloscope ---
+         function startOscilloscope() {
+            if (!animationFrameId) {
+                console.log("Starting oscilloscope...");
+                visualBuffer.fill(0); bufferWriteIndex = 0;
+                // Reset visual state and timers when starting/restarting
+                visualState = 'idle';
+                visualSignalEndTimeMs = 0;
+                visualSpaceEndTimeMs = 0;
+                drawOscilloscope();
+            }
+        }
+
+        // --- Event Listeners ---
+        wpmSlider.addEventListener('input', (e) => { wpm = parseInt(e.target.value, 10); wpmValueSpan.textContent = wpm; updateTiming(); });
+        ratioSlider.addEventListener('input', (e) => { dashRatio = parseFloat(e.target.value); ratioValueSpan.textContent = dashRatio.toFixed(1); updateTiming(); });
+        dotButton.addEventListener('mousedown', () => { if (!dotButton.classList.contains('button-pressed')) { dotButton.classList.add('button-pressed'); startSignal(false); } });
+        dashButton.addEventListener('mousedown', () => { if (!dashButton.classList.contains('button-pressed')) { dashButton.classList.add('button-pressed'); startSignal(true); } });
+        [dotButton, dashButton].forEach(button => { button.addEventListener('mouseup', () => { if (button.classList.contains('button-pressed')) { button.classList.remove('button-pressed'); stopSignal(); } }); button.addEventListener('mouseleave', () => { if (button.classList.contains('button-pressed')) { button.classList.remove('button-pressed'); stopSignal(); } }); });
+        dotButton.addEventListener('touchstart', (e) => { e.preventDefault(); if (!dotButton.classList.contains('button-pressed')) { dotButton.classList.add('button-pressed'); startSignal(false); } }, { passive: false });
+        dashButton.addEventListener('touchstart', (e) => { e.preventDefault(); if (!dashButton.classList.contains('button-pressed')) { dashButton.classList.add('button-pressed'); startSignal(true); } }, { passive: false });
+        [dotButton, dashButton].forEach(button => { button.addEventListener('touchend', (e) => { e.preventDefault(); if (button.classList.contains('button-pressed')) { button.classList.remove('button-pressed'); stopSignal(); } }); button.addEventListener('touchcancel', (e) => { e.preventDefault(); if (button.classList.contains('button-pressed')) { button.classList.remove('button-pressed'); stopSignal(); } }); });
+        window.addEventListener('keydown', (e) => { if (e.metaKey || e.ctrlKey || e.altKey || e.target.tagName === 'INPUT' || e.repeat) { return; } if (e.key === 'ArrowLeft') { e.preventDefault(); if (!keyHeld.ArrowLeft) { keyHeld.ArrowLeft = true; dotButton.classList.add('button-pressed'); startSignal(false); } } else if (e.key === 'ArrowRight') { e.preventDefault(); if (!keyHeld.ArrowRight) { keyHeld.ArrowRight = true; dashButton.classList.add('button-pressed'); startSignal(true); } } });
+        window.addEventListener('keyup', (e) => { if (e.key === 'ArrowLeft') { e.preventDefault(); if (keyHeld.ArrowLeft) { keyHeld.ArrowLeft = false; dotButton.classList.remove('button-pressed'); stopSignal(); } } else if (e.key === 'ArrowRight') { e.preventDefault(); if (keyHeld.ArrowRight) { keyHeld.ArrowRight = false; dashButton.classList.remove('button-pressed'); stopSignal(); } } });
+
+        // --- Initial Setup ---
+        updateTiming();
+        wpmValueSpan.textContent = wpm;
+        ratioValueSpan.textContent = dashRatio.toFixed(1);
+        window.onload = () => {
+           ctx.fillStyle = '#1a202c'; ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+           ctx.strokeStyle = '#4ade80'; ctx.lineWidth = 1.5; ctx.beginPath();
+           ctx.moveTo(0, lowYBase);
+           ctx.lineTo(canvasWidth, lowYBase);
+           ctx.stroke();
+        };
+        document.addEventListener('visibilitychange', () => { if (document.hidden) { if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; console.log("Oscilloscope paused."); } } else { if (!animationFrameId && synth) { startOscilloscope(); } } });
+    </script>
+
+</body>
+</html>
