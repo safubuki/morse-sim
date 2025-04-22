@@ -86,9 +86,9 @@
         const canvas = document.getElementById('oscilloscope');
         const ctx = canvas.getContext('2d');
         canvas.width = 600;
-        canvas.height = 120; // Match HTML height attribute
-        const canvasWidth = canvas.width; // Use logical width for drawing
-        const canvasHeight = canvas.height; // Use logical height for drawing
+        canvas.height = 120;
+        const canvasWidth = canvas.width;
+        const canvasHeight = canvas.height;
         let animationFrameId = null;
         const noiseAmplitude = 1.5;
         const lowYBase = canvasHeight * 0.75;
@@ -97,11 +97,12 @@
 
         // --- Oscilloscope Buffer and Visual State ---
         const bufferSize = canvasWidth;
-        let visualBuffer = new Array(bufferSize).fill(0); // 0: low, 1: high
+        let visualBuffer = new Array(bufferSize).fill(0);
         let bufferWriteIndex = 0;
-        let visualState = 'idle'; // 'idle', 'signal', 'space'
+        let visualState = 'idle';
         let visualSignalEndTimeMs = 0;
         let visualSpaceEndTimeMs = 0;
+        const scrollSpeed = 2; // ★ Speed factor for scrolling
 
 
         // --- UI Elements ---
@@ -111,7 +112,6 @@
         const ratioValueSpan = document.getElementById('ratioValue');
         const dotButton = document.getElementById('dotButton');
         const dashButton = document.getElementById('dashButton');
-        // const statusMessage = document.getElementById('statusMessage'); // Status message div is removed
 
         // --- Audio Initialization ---
         function initAudio() {
@@ -189,8 +189,9 @@
             }
         }
 
-        // --- Oscilloscope Drawing (Time-based State, Right-to-Left) ---
+        // --- Oscilloscope Drawing (Faster Scroll) --- ★ Modified
         function drawOscilloscope() {
+            // 1. Update visual state based on time
             const currentTimeMs = performance.now();
             if (visualState === 'signal' && currentTimeMs >= visualSignalEndTimeMs) {
                 visualState = 'space';
@@ -201,17 +202,23 @@
                 visualSpaceEndTimeMs = 0;
             }
 
+            // ★ Write current state multiple times based on scrollSpeed
             const currentFrameState = (visualState === 'signal') ? 1 : 0;
-            visualBuffer[bufferWriteIndex] = currentFrameState;
+            for (let i = 0; i < scrollSpeed; i++) {
+                 visualBuffer[(bufferWriteIndex + i) % bufferSize] = currentFrameState;
+            }
 
+
+            // 2. Clear canvas
             ctx.fillStyle = '#1a202c';
-            ctx.fillRect(0, 0, canvasWidth, canvasHeight); // Use logical width/height
+            ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
+            // 3. Draw the trace from the buffer (right to left)
             ctx.strokeStyle = '#4ade80';
             ctx.lineWidth = 1.5;
             ctx.beginPath();
 
-            let readIndex = bufferWriteIndex;
+            let readIndex = bufferWriteIndex; // Start reading from the current write position
             let previousY = -1;
 
             for (let x = canvasWidth - 1; x >= 0; x--) {
@@ -230,21 +237,28 @@
                 if (x === canvasWidth - 1) {
                     ctx.moveTo(x, y);
                 } else {
-                    const prevState = visualBuffer[(readIndex + bufferSize - 1) % bufferSize];
+                    // ★ Adjust previous state index check for faster scroll
+                    const prevReadIndex = (readIndex + scrollSpeed + bufferSize -1) % bufferSize; // Look back scrollSpeed steps
+                    const prevState = visualBuffer[prevReadIndex];
                      if (prevState !== state && previousY !== -1) {
                          const fromBaseY = (prevState === 1) ? highYBase : lowYBase;
                          const toBaseY = (state === 1) ? highYBase : lowYBase;
-                         ctx.lineTo(x + 1, fromBaseY);
-                         ctx.lineTo(x + 1, toBaseY);
+                         // Draw vertical line more carefully
+                         ctx.lineTo(x + 1, fromBaseY); // Connect to previous base Y at x+1
+                         ctx.lineTo(x + 1, toBaseY);   // Draw vertical line at x+1
                      }
-                    ctx.lineTo(x, y);
+                    ctx.lineTo(x, y); // Draw horizontal segment
                 }
                 previousY = y;
+                // ★ Decrement read index by 1 (we draw every pixel)
                 readIndex = (readIndex - 1 + bufferSize) % bufferSize;
             }
             ctx.stroke();
 
-            bufferWriteIndex = (bufferWriteIndex + 1) % bufferSize;
+            // ★ Move write index forward by scrollSpeed
+            bufferWriteIndex = (bufferWriteIndex + scrollSpeed) % bufferSize;
+
+            // 5. Request next frame
             animationFrameId = requestAnimationFrame(drawOscilloscope);
         }
 
